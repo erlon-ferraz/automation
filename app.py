@@ -13,7 +13,7 @@ CLIENT_SECRET = 'AlCmzubnNBsPRShTz1ZDHCRm79ohLOMV'
 
 # URL do seu Backend no Render (Preencha após criar o serviço no Render)
 # Ex: https://api-allpecas.onrender.com
-RENDER_URL = 'https://SUA-URL-DO-RENDER.onrender.com' 
+RENDER_URL = 'https://automation-fcdt.onrender.com' 
 
 REDIRECT_URI = f'{RENDER_URL}/Automation/callback'
 TOKEN_FILE = 'tokens.json'
