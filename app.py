@@ -1,19 +1,19 @@
 import os
-import json
-import requests
 import random
+import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
-from flask_cors import CORS  # <--- ISSO É O SEGREDO
+from flask_cors import CORS # Importante
 
 app = Flask(__name__)
-# Permite que a Hostinger acesse este Python
-CORS(app) 
 
-# --- SEU SCRAPER ORIGINAL (MANTIDO) ---
+# --- CORREÇÃO DO CORS ---
+# Isso libera geral. O navegador vai parar de reclamar.
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# --- SEU SCRAPER (MANTIDO IGUAL) ---
 def realizar_scraping(produto, marca):
     termo = f"{produto} {marca}".strip().replace(" ", "-")
-    # A URL mágica que você descobriu
     url = f'https://lista.mercadolivre.com.br/{termo}_OrderId_PRICE_NoIndex_True'
     
     ua_list = [
@@ -28,11 +28,15 @@ def realizar_scraping(produto, marca):
     }
 
     try:
-        print(f"Buscando: {url}")
+        print(f"Buscando no ML: {url}") # Log para ver no painel do Render
         response = requests.get(url, headers=headers)
+        # Se o ML bloquear (403/429), não quebra o server, retorna lista vazia
+        if response.status_code != 200:
+            print(f"Bloqueio ML: {response.status_code}")
+            return []
+
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Tenta os dois layouts do ML
         itens = soup.find_all('li', {'class': 'ui-search-layout__item'})
         if not itens: itens = soup.find_all('div', {'class': 'poly-card'})
 
@@ -40,7 +44,7 @@ def realizar_scraping(produto, marca):
         for item in itens:
             try:
                 # Título
-                t_tit = item.find('a', {'class': 'poly-component__title'}) or item.find('h2', {'class': 'ui-search-item__title'})
+                t_tit = item.find('a', {'class': 'poly-component__title'}) or item.find('h2', {'class': 'ui-search-item__title'}) or item.find('a', {'class': 'ui-search-item__group__element'})
                 if not t_tit: continue
                 titulo = t_tit.text.strip()
                 link = t_tit.get('href')
@@ -52,18 +56,24 @@ def realizar_scraping(produto, marca):
                     inteiro = c_pr.find('span', {'class': 'andes-money-amount__fraction'})
                     cent = c_pr.find('span', {'class': 'andes-money-amount__cents'})
                     if inteiro:
-                        price = float(inteiro.text.replace('.','') + (f".{cent.text}" if cent else ""))
+                        texto_preco = inteiro.text.replace('.', '')
+                        if cent: texto_preco += f".{cent.text}"
+                        price = float(texto_preco)
 
-                # Meta dados
+                # Imagem
                 t_img = item.find('img', {'class': 'poly-component__picture'}) or item.find('img', {'class': 'ui-search-result-image__element'})
                 img = t_img.get('data-src') or t_img.get('src') if t_img else ""
                 
+                # Marca
                 t_brand = item.find('span', {'class': 'poly-component__brand'})
                 brand = t_brand.text.strip() if t_brand else marca.upper()
                 
+                # Vendidos
+                sold = "Novo"
                 t_sold = item.find('span', {'class': 'poly-component__review-compacted'})
-                sold = t_sold.text.strip() if t_sold and "vendido" in t_sold.text else "Novo"
+                if t_sold and "vendido" in t_sold.text.lower(): sold = t_sold.text.strip()
                 
+                # Vendedor
                 t_sell = item.find('span', {'class': 'poly-component__seller'})
                 seller = t_sell.text.strip() if t_sell else "Mercado Livre"
 
@@ -77,26 +87,34 @@ def realizar_scraping(produto, marca):
             
         return resultados
     except Exception as e:
-        print(f"Erro no scraping: {e}")
+        print(f"Erro Crítico: {e}")
         return []
 
 # --- ROTAS ---
 
 @app.route('/')
-def index():
-    return "API All Peças Rodando! 🚀"
+def health_check():
+    return "API Online e Funcionando! ✅"
 
-# Rota simplificada para evitar confusão
+# Essa é a rota exata que seu JS está chamando
 @app.route('/api/busca', methods=['GET'])
 def api_busca():
     prod = request.args.get('produto')
     marca = request.args.get('marca')
     
-    if not prod: return jsonify({'error': 'Faltou o produto'}), 400
+    print(f"Recebido pedido: {prod} - {marca}") # Log para debug
+    
+    if not prod: 
+        return jsonify({'error': 'Faltou o produto'}), 400
     
     items = realizar_scraping(prod, marca)
-    return jsonify({'items': items})
+    
+    # Retorna JSON com cabeçalho CORS explícito (segurança extra)
+    response = jsonify({'items': items})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 if __name__ == '__main__':
+    # Configuração para rodar no Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
